@@ -10,15 +10,211 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from collections import deque
 import datetime
 import smtplib
-from email.mime.text import MIMEText  # Fixed import
+from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import json
 import os
 
+class EnhancedTemperatureReader:
+    """Enhanced temperature reading using WMI and OpenHardwareMonitor"""
+    def __init__(self):
+        self.wmi_available = False
+        self.ohm_available = False
+        self.initialize_wmi()
+    
+    def initialize_wmi(self):
+        """Initialize WMI connection and check OpenHardwareMonitor availability"""
+        try:
+            import wmi
+            self.wmi_available = True
+            print("✅ WMI support initialized")
+            
+            # Test if OpenHardwareMonitor is running
+            try:
+                w = wmi.WMI(namespace="root\\OpenHardwareMonitor")
+                sensors = w.Sensor()
+                self.ohm_available = True
+                print("✅ OpenHardwareMonitor detected and accessible")
+                print(f"📊 Found {len(sensors)} sensors")
+            except Exception as e:
+                print("❌ OpenHardwareMonitor not detected or not running")
+                print("💡 Please run OpenHardwareMonitor as Administrator")
+                self.ohm_available = False
+                
+        except ImportError:
+            print("❌ WMI not available - install: pip install wmi")
+            self.wmi_available = False
+            self.ohm_available = False
+    
+    def get_temperature_multisource(self):
+        """Get temperature from multiple sources in priority order"""
+        
+        # 1. Try OpenHardwareMonitor via WMI (most accurate)
+        if self.ohm_available:
+            temp = self.get_temperature_ohm()
+            if temp is not None:
+                return temp
+        
+        # 2. Try built-in WMI thermal zones
+        if self.wmi_available:
+            temp = self.get_temperature_builtin_wmi()
+            if temp is not None:
+                return temp
+        
+        # 3. Try psutil (limited Windows support)
+        temp = self.get_temperature_psutil()
+        if temp is not None:
+            return temp
+        
+        # 4. Final fallback to simulation
+        print("⚠️ No hardware temperature sources available - using simulation")
+        return self.simulate_temperature()
+    
+    def get_temperature_ohm(self):
+        """Get temperature from OpenHardwareMonitor via WMI"""
+        try:
+            import wmi
+            w = wmi.WMI(namespace="root\\OpenHardwareMonitor")
+            sensors = w.Sensor()
+            
+            cpu_temps = []
+            core_temps = []
+            other_temps = []
+            
+            for sensor in sensors:
+                if (sensor.SensorType == "Temperature" and 
+                    sensor.Value is not None and 
+                    float(sensor.Value) > 0):
+                    
+                    temp_value = float(sensor.Value)
+                    
+                    # Categorize temperatures by priority
+                    if "CPU" in sensor.Name or "Package" in sensor.Name:
+                        cpu_temps.append((sensor.Name, temp_value))
+                    elif "Core" in sensor.Name:
+                        core_temps.append((sensor.Name, temp_value))
+                    else:
+                        other_temps.append((sensor.Name, temp_value))
+            
+            # Return the highest priority temperature
+            if cpu_temps:
+                name, temp = max(cpu_temps, key=lambda x: x[1])  # Get highest CPU temp
+                print(f"🌡️ OpenHardwareMonitor - {name}: {temp}°C")
+                return temp
+            elif core_temps:
+                name, temp = max(core_temps, key=lambda x: x[1])  # Get highest core temp
+                print(f"🌡️ OpenHardwareMonitor - {name}: {temp}°C")
+                return temp
+            elif other_temps:
+                name, temp = max(other_temps, key=lambda x: x[1])  # Get highest other temp
+                print(f"🌡️ OpenHardwareMonitor - {name}: {temp}°C")
+                return temp
+            
+            return None
+            
+        except Exception as e:
+            print(f"❌ OpenHardwareMonitor reading failed: {e}")
+            self.ohm_available = False  # Disable OHM on error
+            return None
+    
+    def get_temperature_builtin_wmi(self):
+        """Use built-in Windows thermal monitoring"""
+        try:
+            import wmi
+            c = wmi.WMI()
+            
+            # Method 1: Thermal zones (most reliable built-in)
+            for thermal in c.MSAcpi_ThermalZoneTemperature():
+                if thermal.CurrentTemperature:
+                    temp_kelvin = float(thermal.CurrentTemperature)
+                    temp_celsius = (temp_kelvin / 10) - 273.15
+                    if 10 <= temp_celsius <= 120:  # Reasonable range
+                        print(f"🌡️ WMI Thermal Zone: {temp_celsius:.1f}°C")
+                        return temp_celsius
+            
+            return None
+        except Exception as e:
+            print(f"❌ Built-in WMI thermal reading failed: {e}")
+            return None
+    
+    def get_temperature_psutil(self):
+        """Original psutil method with better error handling"""
+        try:
+            if hasattr(psutil, "sensors_temperatures"):
+                temps = psutil.sensors_temperatures()
+                if temps:
+                    print("📊 psutil sensors found:")
+                    for name, entries in temps.items():
+                        for entry in entries:
+                            if entry.current and entry.current > 0:
+                                print(f"  {name}: {entry.current}°C")
+                                return entry.current
+            return None
+        except Exception as e:
+            print(f"❌ psutil temperature reading failed: {e}")
+            return None
+    
+    def simulate_temperature(self):
+        """Fallback simulation based on CPU usage"""
+        import random
+        try:
+            cpu_usage = psutil.cpu_percent(interval=0.1)
+            # More realistic simulation based on CPU usage
+            base_temp = 35 + (cpu_usage * 0.25)  # Reduced multiplier for realism
+            base_temp += random.uniform(-1, 1)   # Reduced random variation
+            
+            # Occasionally simulate realistic spikes during high CPU usage
+            if cpu_usage > 80 and random.random() > 0.7:
+                spike_temp = base_temp + random.uniform(5, 15)
+                print(f"🔥 Simulated temperature spike: {spike_temp:.1f}°C")
+                return min(85, spike_temp)
+                
+            return max(25, base_temp)
+        except:
+            return 45.0  # Default fallback
+    
+    def get_detailed_sensor_info(self):
+        """Get detailed information about all available sensors"""
+        if not self.wmi_available:
+            return "WMI not available"
+        
+        try:
+            import wmi
+            info = []
+            
+            # OpenHardwareMonitor sensors
+            if self.ohm_available:
+                try:
+                    w = wmi.WMI(namespace="root\\OpenHardwareMonitor")
+                    sensors = w.Sensor()
+                    info.append("=== OpenHardwareMonitor Sensors ===")
+                    for sensor in sensors:
+                        if sensor.SensorType == "Temperature":
+                            info.append(f"  {sensor.Name}: {sensor.Value}°C")
+                except:
+                    info.append("OpenHardwareMonitor not accessible")
+            
+            # Built-in WMI sensors
+            try:
+                c = wmi.WMI()
+                info.append("=== Built-in WMI Sensors ===")
+                for thermal in c.MSAcpi_ThermalZoneTemperature():
+                    if thermal.CurrentTemperature:
+                        temp_kelvin = float(thermal.CurrentTemperature)
+                        temp_celsius = (temp_kelvin / 10) - 273.15
+                        info.append(f"  Thermal Zone: {temp_celsius:.1f}°C")
+            except:
+                info.append("No built-in thermal zones")
+            
+            return "\n".join(info) if info else "No sensor information available"
+            
+        except Exception as e:
+            return f"Error getting sensor info: {e}"
+
 class TemperatureMonitor:
     def __init__(self, root):
         self.root = root
-        self.root.title("Device Temperature Monitor")
+        self.root.title("ThermoGuard - Device Temperature Monitor")
         self.root.geometry("700x600")
         self.root.resizable(True, True)
         
@@ -39,14 +235,17 @@ class TemperatureMonitor:
         self.temp_history = deque(maxlen=50)
         self.time_history = deque(maxlen=50)
         
+        # Enhanced temperature reader
+        self.temp_reader = EnhancedTemperatureReader()
+        
         # Email settings
         self.email_settings = {
             'enabled': False,
             'smtp_server': 'smtp.gmail.com',
             'smtp_port': 587,
-            'sender_email': 'kyosxel@gmail.com',
-            'sender_password': 'xxcc dvxo thjw hojy',
-            'receiver_email': 'sirflukee@gmail.com',
+            'sender_email': '',
+            'sender_password': '',
+            'receiver_email': '',
             'use_tls': True
         }
         
@@ -85,19 +284,26 @@ class TemperatureMonitor:
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         # Title
-        title_label = ttk.Label(main_frame, text="Device Temperature Monitor", 
+        title_label = ttk.Label(main_frame, text="ThermoGuard - Device Temperature Monitor", 
                                font=("Arial", 16, "bold"))
         title_label.grid(row=0, column=0, columnspan=3, pady=(0, 20))
+        
+        # Sensor status display
+        self.sensor_status_var = tk.StringVar()
+        sensor_status_label = ttk.Label(main_frame, textvariable=self.sensor_status_var,
+                                      font=("Arial", 9), foreground="green")
+        sensor_status_label.grid(row=1, column=0, columnspan=3, pady=(0, 5))
+        self.update_sensor_status()
         
         # Current time display
         self.time_var = tk.StringVar(value="Loading...")
         time_label = ttk.Label(main_frame, textvariable=self.time_var,
                               font=("Arial", 10), foreground="gray")
-        time_label.grid(row=1, column=0, columnspan=3, pady=(0, 10))
+        time_label.grid(row=2, column=0, columnspan=3, pady=(0, 10))
         
         # Temperature display with larger font
         temp_frame = ttk.Frame(main_frame)
-        temp_frame.grid(row=2, column=0, columnspan=3, pady=10)
+        temp_frame.grid(row=3, column=0, columnspan=3, pady=10)
         
         ttk.Label(temp_frame, text="Current Temperature:", 
                  font=("Arial", 12)).grid(row=0, column=0, padx=(0, 10))
@@ -109,23 +315,23 @@ class TemperatureMonitor:
         
         # Temperature status indicator
         self.status_indicator = tk.Canvas(main_frame, width=20, height=20, bg="gray")
-        self.status_indicator.grid(row=2, column=2, padx=(10, 0))
+        self.status_indicator.grid(row=3, column=2, padx=(10, 0))
         
         # Status display
         self.status_var = tk.StringVar(value="Status: Initializing...")
         status_label = ttk.Label(main_frame, textvariable=self.status_var,
                                 font=("Arial", 11))
-        status_label.grid(row=3, column=0, columnspan=3, pady=5)
+        status_label.grid(row=4, column=0, columnspan=3, pady=5)
         
         # Last update time
         self.last_update_var = tk.StringVar(value="Last update: --")
         last_update_label = ttk.Label(main_frame, textvariable=self.last_update_var,
                                      font=("Arial", 9), foreground="blue")
-        last_update_label.grid(row=4, column=0, columnspan=3, pady=(0, 10))
+        last_update_label.grid(row=5, column=0, columnspan=3, pady=(0, 10))
         
         # Controls frame
         controls_frame = ttk.LabelFrame(main_frame, text="Monitoring Controls", padding="10")
-        controls_frame.grid(row=5, column=0, columnspan=3, pady=10, sticky=(tk.W, tk.E))
+        controls_frame.grid(row=6, column=0, columnspan=3, pady=10, sticky=(tk.W, tk.E))
         
         # Start/Stop buttons
         self.start_button = ttk.Button(controls_frame, text="Start Alert Monitoring", 
@@ -148,9 +354,13 @@ class TemperatureMonitor:
         ttk.Button(controls_frame, text="Refresh Now", 
                   command=self.manual_refresh).grid(row=0, column=5, padx=5)
         
+        # Sensor Info button
+        ttk.Button(controls_frame, text="Sensor Info", 
+                  command=self.show_sensor_info).grid(row=0, column=6, padx=5)
+        
         # Settings frame
         settings_frame = ttk.LabelFrame(main_frame, text="Temperature Settings (°C)", padding="10")
-        settings_frame.grid(row=6, column=0, columnspan=3, pady=10, sticky=(tk.W, tk.E))
+        settings_frame.grid(row=7, column=0, columnspan=3, pady=10, sticky=(tk.W, tk.E))
         
         # Warning temperature
         ttk.Label(settings_frame, text="Warning Temp:").grid(row=0, column=0, sticky=tk.W)
@@ -170,7 +380,7 @@ class TemperatureMonitor:
         
         # Email Settings Frame
         email_frame = ttk.LabelFrame(main_frame, text="Email Alert Settings", padding="10")
-        email_frame.grid(row=7, column=0, columnspan=3, pady=10, sticky=(tk.W, tk.E))
+        email_frame.grid(row=8, column=0, columnspan=3, pady=10, sticky=(tk.W, tk.E))
         
         # Email enable checkbox
         self.email_enabled_var = tk.BooleanVar(value=self.email_settings['enabled'])
@@ -213,7 +423,7 @@ class TemperatureMonitor:
         
         # Temperature graph
         graph_frame = ttk.LabelFrame(main_frame, text="Temperature History (Last 5 minutes)", padding="10")
-        graph_frame.grid(row=8, column=0, columnspan=3, pady=10, sticky=(tk.W, tk.E, tk.N, tk.S))
+        graph_frame.grid(row=9, column=0, columnspan=3, pady=10, sticky=(tk.W, tk.E, tk.N, tk.S))
         
         # Create matplotlib figure
         self.fig, self.ax = plt.subplots(figsize=(8, 3))
@@ -224,15 +434,35 @@ class TemperatureMonitor:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         main_frame.columnconfigure(0, weight=1)
-        main_frame.rowconfigure(8, weight=1)
+        main_frame.rowconfigure(9, weight=1)
         
         # Initialize email settings visibility
         self.toggle_email_settings()
+    
+    def update_sensor_status(self):
+        """Update sensor status display"""
+        if self.temp_reader.ohm_available:
+            status = "✅ Reading real hardware temperatures via OpenHardwareMonitor"
+            color = "green"
+        elif self.temp_reader.wmi_available:
+            status = "⚠️ Using WMI thermal sensors (limited accuracy)"
+            color = "orange"
+        else:
+            status = "⚠️ Using simulated temperatures (install WMI for real readings)"
+            color = "red"
+        
+        self.sensor_status_var.set(status)
+        # Note: You might need to update the label color separately
+    
+    def show_sensor_info(self):
+        """Show detailed sensor information"""
+        info = self.temp_reader.get_detailed_sensor_info()
+        messagebox.showinfo("Sensor Information", info)
         
     def toggle_email_settings(self):
         """Enable/disable email settings fields based on checkbox"""
         state = "normal" if self.email_enabled_var.get() else "disabled"
-        children = self.root.winfo_children()[0].winfo_children()[7].winfo_children()
+        children = self.root.winfo_children()[0].winfo_children()[8].winfo_children()
         # Skip the first child (checkbox)
         for child in children[1:]:
             if hasattr(child, 'configure'):
@@ -255,20 +485,8 @@ class TemperatureMonitor:
         self.root.after(1000, self.update_time_display)
         
     def get_temperature(self):
-        """Get current temperature using psutil"""
-        try:
-            if hasattr(psutil, "sensors_temperatures"):
-                temps = psutil.sensors_temperatures()
-                if temps:
-                    for name, entries in temps.items():
-                        for entry in entries:
-                            if entry.current:  # Only use if current temperature is available
-                                return entry.current
-            # Fallback: Return a simulated temperature for demonstration
-            return self.simulate_temperature()
-        except Exception as e:
-            print(f"Error getting temperature: {e}")
-            return None
+        """Get current temperature using enhanced reader"""
+        return self.temp_reader.get_temperature_multisource()
     
     def get_system_info(self):
         """Get CPU and memory usage"""
@@ -279,28 +497,6 @@ class TemperatureMonitor:
             return cpu_percent, memory_percent
         except:
             return None, None
-    
-    def simulate_temperature(self):
-        """Simulate temperature readings for demonstration"""
-        import random
-        # Base temperature influenced by CPU usage
-        try:
-            cpu_usage = psutil.cpu_percent(interval=0.1)
-            base_temp = 30 + (cpu_usage * 0.4)
-        except:
-            base_temp = 45
-            
-        base_temp += random.uniform(-2, 2)
-        
-        # Occasionally simulate temperature spikes
-        spike_chance = random.random()
-        
-        if spike_chance > 0.98:  # 2% chance of critical spike
-            return min(95, base_temp + random.uniform(40, 50))
-        elif spike_chance > 0.92:  # 6% chance of warning spike
-            return min(85, base_temp + random.uniform(20, 30))
-        else:
-            return max(30, base_temp)
     
     def update_status_indicator(self, temperature):
         """Update the status indicator color based on temperature"""
@@ -360,7 +556,7 @@ class TemperatureMonitor:
             Please check your device immediately!
             """
             
-            msg.attach(MIMEText(body, 'plain'))  # Fixed: MIMEText instead of MimeText
+            msg.attach(MIMEText(body, 'plain'))
             
             # Connect to server and send email
             server = smtplib.SMTP(self.email_settings['smtp_server'], self.email_settings['smtp_port'])
@@ -576,6 +772,12 @@ def main():
     try:
         import psutil
         from plyer import notification
+        # Try to import WMI (optional)
+        try:
+            import wmi
+            print("✅ WMI support available")
+        except ImportError:
+            print("⚠️ WMI not available - install with: pip install wmi")
     except ImportError as e:
         print(f"Missing dependency: {e}")
         print("Please install required packages:")
