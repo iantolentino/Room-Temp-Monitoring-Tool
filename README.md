@@ -1,20 +1,7 @@
-Here are the `requirements.txt` file and a new user-friendly README:
-
-## 📋 **requirements.txt**
-```txt
-psutil>=5.9.0
-plyer>=2.1.0
-matplotlib>=3.5.0
-wmi>=1.5.1
-```
-
----
-
 # 🌡️ ThermoGuard - Real-Time Temperature Monitor
 
 ![Python](https://img.shields.io/badge/Python-3.6%2B-blue)
 ![Windows](https://img.shields.io/badge/Platform-Windows-lightgrey)
-![License](https://img.shields.io/badge/License-MIT-green)
 
 **Protect your computer from overheating with real-time temperature monitoring and instant alerts!**
 
@@ -246,15 +233,5 @@ python thermoguard.py
 ## 📄 **License**
 
 This project is licensed under the **MIT License** - feel free to use, modify, and distribute for any purpose.
-
----
-
-## 🎉 **Enjoy Your Protected System!**
-
-With ThermoGuard running, you can work and play with peace of mind knowing your device is protected from overheating damage. The app will automatically alert you before temperatures reach dangerous levels, giving you time to take preventive action.
-
-**Stay cool and protected!** ❄️🛡️
-
----
 
 *ThermoGuard - Because your hardware deserves protection.*
