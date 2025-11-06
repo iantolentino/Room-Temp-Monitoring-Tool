@@ -5,7 +5,7 @@
 
 **Protect your computer from overheating with real-time temperature monitoring and instant alerts!**
 
-ThermoGuard is a powerful yet easy-to-use application that continuously monitors your device's temperature and alerts you before it reaches dangerous levels. Perfect for gamers, developers, and anyone who wants to protect their hardware.
+ThermoGuard is a powerful yet easy-to-use application that continuously monitors your device's temperature and alerts you before it reaches dangerous levels. Perfect for gamers, developers, servers and anyone who wants to protect their hardware.
 
 ---
 
