@@ -148,7 +148,7 @@ python servertemp_monitor.py
 ### **Server Sensor Status Meanings**
 - **✅ Green Status**: Reading real server hardware temperatures
 - **🟡 Orange Status**: Using limited built-in server sensors
-- **🔴 Red Status**: Using simulations (install OpenHardwareMonitor on server)
+- **🔴 Red Status**: Install OpenHardwareMonitor on server
 
 ---
 
